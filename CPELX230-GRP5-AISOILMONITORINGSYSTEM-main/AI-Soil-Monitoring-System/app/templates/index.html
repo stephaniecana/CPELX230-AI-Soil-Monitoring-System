@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Soil Monitoring System</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <main class="container">
+    <section class="hero">
+      <p class="eyebrow">Embedded AI / Machine Learning Project</p>
+      <h1>AI-Based Soil Monitoring System</h1>
+      <p class="subtitle">
+        Random Forest prediction using soil moisture, temperature, and humidity.
+      </p>
+    </section>
+
+    <section class="grid">
+      <div class="card">
+        <h2>Manual Prediction</h2>
+        <form id="predictionForm">
+          <label>
+            Soil Moisture (%)
+            <input id="soil_moisture" type="number" min="0" max="100" step="0.1" value="45" required>
+          </label>
+
+          <label>
+            Temperature (°C)
+            <input id="temperature" type="number" min="-10" max="60" step="0.1" value="31" required>
+          </label>
+
+          <label>
+            Humidity (%)
+            <input id="humidity" type="number" min="0" max="100" step="0.1" value="55" required>
+          </label>
+
+          <button type="submit">Run ML Prediction</button>
+        </form>
+      </div>
+
+      <div class="card result-card">
+        <h2>Prediction</h2>
+        <div id="prediction" class="prediction neutral">Waiting for input</div>
+        <p id="confidence">Confidence: —</p>
+
+        <div class="probability-list">
+          <div><span>No Water</span><strong id="pNoWater">—</strong></div>
+          <div><span>Water Soon</span><strong id="pWaterSoon">—</strong></div>
+          <div><span>Water Now</span><strong id="pWaterNow">—</strong></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Latest ESP32 Reading</h2>
+      <div class="sensor-row">
+        <div><span>Moisture</span><strong id="latestMoisture">—</strong></div>
+        <div><span>Temperature</span><strong id="latestTemperature">—</strong></div>
+        <div><span>Humidity</span><strong id="latestHumidity">—</strong></div>
+        <div><span>AI Decision</span><strong id="latestPrediction">—</strong></div>
+      </div>
+      <p class="muted" id="latestTimestamp">No ESP32 data received yet.</p>
+    </section>
+
+    <section class="card">
+      <h2>System Flow</h2>
+      <div class="flow">
+        <span>Soil Sensor + DHT22</span>
+        <b>→</b>
+        <span>ESP32</span>
+        <b>→</b>
+        <span>Flask API</span>
+        <b>→</b>
+        <span>Random Forest</span>
+        <b>→</b>
+        <span>Watering Decision</span>
+      </div>
+    </section>
+  </main>
+
+  <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>
