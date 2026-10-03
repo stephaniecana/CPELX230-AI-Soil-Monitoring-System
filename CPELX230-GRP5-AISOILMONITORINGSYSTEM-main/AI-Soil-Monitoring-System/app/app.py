@@ -77,7 +77,7 @@ def health():
   })
 
 
-# Tinatanggap ang lahat ng karaniwang endpoints mula sa Wokwi o web dashboard
+
 @app.post("/predict")
 @app.post("/api/predict")
 @app.post("/api/sensor")
