@@ -1,129 +1,161 @@
-/*
-  AI-Based Soil Monitoring System - ESP32
-
-  Hardware:
-  - ESP32
-  - Capacitive soil moisture sensor -> GPIO 34 (analog)
-  - DHT22 -> GPIO 4
-
-  Libraries required in Arduino IDE:
-  - DHT sensor library by Adafruit
-  - Adafruit Unified Sensor
-
-  IMPORTANT:
-  1. Replace WIFI_SSID and WIFI_PASSWORD.
-  2. Replace SERVER_URL with the IP address of the PC running Flask.
-     Example: http://192.168.1.5:5000/api/sensor
-  3. Calibrate AIR_VALUE and WATER_VALUE for your actual soil sensor.
-*/
-
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <DHT.h>
+#include <ArduinoJson.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
 
+// PIN DEFINITIONS
+// =========================
+#define SOIL_PIN 34
 #define DHT_PIN 4
 #define DHT_TYPE DHT22
-#define SOIL_PIN 34
 
+#define OLED_SDA 21
+#define OLED_SCL 22
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+#define OLED_ADDRESS 0x3C
+
+#define LED_RED 18
+#define LED_GREEN 19
+
+// INSTANCES
+// =========================
 DHT dht(DHT_PIN, DHT_TYPE);
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 
-const char* WIFI_SSID = "YOUR_WIFI_NAME";
-const char* WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
-const char* SERVER_URL = "http://192.168.1.5:5000/api/sensor";
+// NETWORK CONFIGURATION
+// =========================
+const char* ssid = "Wokwi-GUEST";
+const char* password = "";
 
-// Example calibration values for a 12-bit ESP32 ADC.
-// You MUST measure these using your own sensor.
-const int AIR_VALUE = 3200;    // Dry / air reading
-const int WATER_VALUE = 1300;  // Wet / water reading
 
-unsigned long lastSend = 0;
-const unsigned long SEND_INTERVAL = 5000;
+const char* serverEndpoint = "https://t3c7c4ns-5000.asse.devtunnels.ms/api/sensor";
 
-float readSoilMoisturePercent() {
-  int rawValue = analogRead(SOIL_PIN);
-
-  float percent = 100.0 * (AIR_VALUE - rawValue) / (AIR_VALUE - WATER_VALUE);
-
-  if (percent < 0) percent = 0;
-  if (percent > 100) percent = 100;
-
-  Serial.print("Soil raw: ");
-  Serial.print(rawValue);
-  Serial.print(" | Moisture: ");
-  Serial.print(percent, 1);
-  Serial.println("%");
-
-  return percent;
+void updateOLED(float soil, float temp, float hum, String status) {
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  
+  display.setCursor(0, 0);
+  display.println("AI SOIL MONITOR");
+  display.println("---------------------");
+  
+  display.printf("Moisture: %.1f %%\n", soil);
+  display.printf("Temp:     %.1f C\n", temp);
+  display.printf("Humidity: %.1f %%\n", hum);
+  
+  display.println("---------------------");
+  display.print("Status: ");
+  display.println(status);
+  display.display();
 }
 
 void setup() {
   Serial.begin(115200);
+
+  // Initialize LEDs
+  pinMode(LED_RED, OUTPUT);
+  pinMode(LED_GREEN, OUTPUT);
+  digitalWrite(LED_RED, LOW);
+  digitalWrite(LED_GREEN, LOW);
+
+  // Initialize Sensors & Peripherals
   dht.begin();
+  analogReadResolution(12); // ESP32 12-bit ADC (0 - 4095)
 
-  analogReadResolution(12);
+  Wire.begin(OLED_SDA, OLED_SCL);
+  if (!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDRESS)) {
+    Serial.println(F("SSD1306 allocation failed!"));
+  } else {
+    display.clearDisplay();
+    display.setTextSize(1);
+    display.setTextColor(SSD1306_WHITE);
+    display.setCursor(0, 20);
+    display.println("Connecting WiFi...");
+    display.display();
+  }
 
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  // Connect to WiFi
+  WiFi.begin(ssid, password);
   Serial.print("Connecting to Wi-Fi");
-
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
   }
+  Serial.println("\n[Wi-Fi Connected]");
 
-  Serial.println();
-  Serial.print("Connected. ESP32 IP: ");
-  Serial.println(WiFi.localIP());
+  updateOLED(0, 0, 0, "System Ready");
 }
 
 void loop() {
-  if (millis() - lastSend < SEND_INTERVAL) {
+  // Read Sensors
+  float temp = dht.readTemperature();
+  float hum = dht.readHumidity();
+  int rawSoil = analogRead(SOIL_PIN);
+
+  // Map 12-bit ADC (0 - 4095) to Soil Moisture Percentage (0 - 100%)
+  float soilMoisturePct = map(rawSoil, 0, 4095, 0, 100);
+
+  if (isnan(temp) || isnan(hum)) {
+    Serial.println("DHT sensor read failed!");
+    updateOLED(soilMoisturePct, 0, 0, "Sensor Error");
+    delay(2000);
     return;
   }
 
-  lastSend = millis();
+  Serial.printf("\nTelemetry -> Soil: %.1f%% | Temp: %.1f C | Hum: %.1f%%\n",
+                soilMoisturePct, temp, hum);
 
-  float soilMoisture = readSoilMoisturePercent();
-  float temperature = dht.readTemperature();
-  float humidity = dht.readHumidity();
+  String predictionStr = "Connecting...";
 
-  if (isnan(temperature) || isnan(humidity)) {
-    Serial.println("Failed to read DHT22.");
-    return;
-  }
+  if (WiFi.status() == WL_CONNECTED) {
+    HTTPClient http;
+    http.begin(serverEndpoint);
+    http.addHeader("Content-Type", "application/json");
 
-  Serial.print("Temperature: ");
-  Serial.print(temperature, 1);
-  Serial.print(" C | Humidity: ");
-  Serial.print(humidity, 1);
-  Serial.println("%");
+    StaticJsonDocument<200> payloadDoc;
+    payloadDoc["soil_moisture"] = soilMoisturePct;
+    payloadDoc["temperature"] = temp;
+    payloadDoc["humidity"] = hum;
 
-  if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("Wi-Fi disconnected. Reconnecting...");
-    WiFi.reconnect();
-    return;
-  }
+    String jsonString;
+    serializeJson(payloadDoc, jsonString);
 
-  HTTPClient http;
-  http.begin(SERVER_URL);
-  http.addHeader("Content-Type", "application/json");
+    int httpCode = http.POST(jsonString);
+    if (httpCode == 200) {
+      String response = http.getString();
+      Serial.println("Server Response: " + response);
 
-  String json =
-      "{\"soil_moisture\":" + String(soilMoisture, 1) +
-      ",\"temperature\":" + String(temperature, 1) +
-      ",\"humidity\":" + String(humidity, 1) + "}";
+      StaticJsonDocument<300> resDoc;
+      deserializeJson(resDoc, response);
+      const char* pred = resDoc["prediction"];
+      predictionStr = String(pred);
 
-  int httpCode = http.POST(json);
-
-  Serial.print("HTTP status: ");
-  Serial.println(httpCode);
-
-  if (httpCode > 0) {
-    String response = http.getString();
-    Serial.print("Server response: ");
-    Serial.println(response);
+      // Actuate LEDs based on ML Prediction
+      if (predictionStr == "Water now" || predictionStr == "Needs Watering") {
+        digitalWrite(LED_RED, HIGH);
+        digitalWrite(LED_GREEN, LOW);
+      } else if (predictionStr == "Water soon") {
+        digitalWrite(LED_RED, HIGH);
+        digitalWrite(LED_GREEN, HIGH);
+      } else { // "Adequately Watered" / "No water needed"
+        digitalWrite(LED_RED, LOW);
+        digitalWrite(LED_GREEN, HIGH);
+      }
+    } else {
+      Serial.printf("HTTP Error, Code: %d\n", httpCode);
+      predictionStr = "API Error";
+    }
+    http.end();
   } else {
-    Serial.println("Failed to send data to Flask server.");
+    predictionStr = "No WiFi";
   }
 
-  http.end();
+  // Update OLED Display
+  updateOLED(soilMoisturePct, temp, hum, predictionStr);
+
+  delay(4000); // 4-second sampling interval
 }
